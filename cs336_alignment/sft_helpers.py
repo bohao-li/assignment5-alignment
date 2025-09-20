@@ -185,3 +185,87 @@ def get_response_log_probs(
     return results
 
 
+def masked_normalize(
+    tensor: torch.Tensor,
+    mask: torch.Tensor,
+    normalize_constant: float,
+    dim: int | None = None,
+) -> torch.Tensor:
+    """
+    Sum over a dimension and normalize by a constant, considering only those elements
+    where mask == 1.
+
+    Args:
+        tensor: torch.Tensor The tensor to sum and normalize.
+        mask: torch.Tensor Same shape as tensor; positions with 1 are included in the sum.
+        normalize_constant: float the constant to divide by for normalization.
+        dim: int | None the dimension to sum along before normalization. If None, sum over all
+                      dimensions.
+
+    Returns:
+        torch.Tensor the normalized sum, where masked elements (mask == 0) don’t contribute to
+        the sum.
+    """
+    # Use element-wise multiplication to zero out elements where the mask is 0.
+    masked_tensor = tensor * mask
+
+    # Sum the masked tensor along the specified dimension.
+    # The `keepdim=False` is the default, so the dimension is squeezed out.
+    normalized_sum = torch.sum(masked_tensor, dim=dim)
+
+    # Normalize by dividing by the constant.
+    normalized_result = normalized_sum / normalize_constant
+
+    return normalized_result
+
+def sft_microbatch_train_step(
+    policy_log_probs: torch.Tensor,
+    response_mask: torch.Tensor,
+    gradient_accumulation_steps: int,
+    normalize_constant: float = 1.0,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """
+    Execute a forward-and-backward pass on a microbatch.
+    
+    Args:
+        policy_log_probs (batch_size, sequence_length), per-token log-probabilities from the
+        SFT policy being trained.
+        response_mask (batch_size, sequence_length), 1 for response tokens, 0 for
+        prompt/padding.
+        gradient_accumulation_steps Number of microbatches per optimizer step.
+        normalize_constant The constant by which to divide the sum. It is fine to leave this as 1.0.
+    
+    Returns:
+        tuple[torch.Tensor, dict[str, torch.Tensor]].
+    """
+    # 1. Calculate the negative log-likelihood (NLL) for each token.
+    # The SFT loss is the negative log-probability of the correct next token.
+    # We want to minimize -log_probs, which is equivalent to maximizing log_probs.
+    nll = -policy_log_probs
+
+    # 2. Apply the response mask to the NLL to only consider the loss on response tokens.
+    # The mask will zero out the loss for all prompt and padding tokens.
+    loss_per_batch_item = masked_normalize(
+        tensor=nll,
+        mask=response_mask,
+        normalize_constant=normalize_constant,
+        dim=-1
+    )
+    loss = torch.mean(loss_per_batch_item)
+
+    # 4. Scale the loss for gradient accumulation.
+    # We need to divide the loss by the number of accumulation steps so the
+    # gradients for each microbatch are averaged when summed.
+    loss = loss / (gradient_accumulation_steps)
+    
+    # 5. Perform the backward pass to compute gradients.
+    loss.backward()
+
+    # 6. Prepare metadata for logging.
+    metadata = {
+        "loss": loss.item(),
+        "per_token_loss": loss_per_batch_item.mean().item()
+    }
+
+    return loss, metadata
+
