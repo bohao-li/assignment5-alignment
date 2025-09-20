@@ -339,7 +339,7 @@ Assistant: <think>"""
 # Example usage
 def main():
     # Set your API key here or via environment variable
-    api_key = ""
+    api_key = "AIzaSyAwsymkmI5n03ORYL_ECpJLmB2ljjkjGvk"
     
     if not api_key:
         print("Please set your API key as GEMINI_API_KEY environment variable")
