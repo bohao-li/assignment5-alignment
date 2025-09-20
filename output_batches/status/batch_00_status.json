@@ -1,0 +1,14 @@
+{
+  "batch_id": 0,
+  "total_problems": 1000,
+  "completed": 282,
+  "successful": 282,
+  "failed": 0,
+  "start_time": "2025-09-18T19:47:51.903569",
+  "last_update": "2025-09-18T21:22:48.445555",
+  "status": "running",
+  "current_problem": 282,
+  "progress_percent": 28.199999999999996,
+  "estimated_completion": "2025-09-19T01:24:32.407185",
+  "errors": []
+}
