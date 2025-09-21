@@ -26,8 +26,6 @@ from math import isclose
 from typing import Optional
 
 import sympy
-from latex2sympy2_extended import latex2sympy
-from math_verify import ExprExtractionConfig, LatexExtractionConfig, parse, verify
 from pylatexenc import latex2text
 from sympy import N, simplify
 from sympy.parsing import sympy_parser
@@ -524,135 +522,6 @@ def numeric_equal(prediction: float, reference: float):
     return isclose(reference, prediction, rel_tol=1e-4)
 
 
-def symbolic_equal(a, b):
-    def _parse(s):
-        for f in [parse_latex, parse_expr, latex2sympy]:
-            try:
-                return f(s.replace("\\\\", "\\"))
-            except:
-                try:
-                    return f(s)
-                except:
-                    pass
-        return s
-
-    a = _parse(a)
-    b = _parse(b)
-
-    # direct equal
-    try:
-        if str(a) == str(b) or a == b:
-            return True
-    except:
-        pass
-
-    # simplify equal
-    try:
-        if a.equals(b) or simplify(a - b) == 0:
-            return True
-    except:
-        pass
-
-    # equation equal
-    try:
-        if (abs(a.lhs - a.rhs)).equals(abs(b.lhs - b.rhs)):
-            return True
-    except:
-        pass
-
-    try:
-        if numeric_equal(float(N(a)), float(N(b))):
-            return True
-    except:
-        pass
-
-    # matrix
-    try:
-        # if a and b are matrix
-        if a.shape == b.shape:
-            _a = a.applyfunc(lambda x: round(x, 3))
-            _b = b.applyfunc(lambda x: round(x, 3))
-            if _a.equals(_b):
-                return True
-    except:
-        pass
-
-    return False
-
-
-def _is_latex_equal(str1, str2):
-    try:
-        sym1, val1 = latex_eval(str1)
-        sym2, val2 = latex_eval(str2)
-        if sym1 == sym2 or val1 == val2:
-            return True
-        else:
-            raise ValueError
-    except Exception:  # noqa
-        try:
-            norm1, norm2 = normalize_final_answer(str1), normalize_final_answer(str2)
-            sym1, val1 = latex_eval(norm1)
-            sym2, val2 = latex_eval(norm2)
-            if sym1 == sym2 or val1 == val2:
-                return True
-        except Exception:  # noqa
-            return norm1 == norm2
-    return False
-
-
-def is_latex_equal(given_answer: str, ground_truth: str) -> bool:
-    try:
-        with timeout(1):
-            try:
-                if (len(given_answer) > 128 and repeatness(given_answer)) or (
-                    len(ground_truth) > 128 and repeatness(ground_truth)
-                ):
-                    return False
-                # First conduct normalized string matching.
-                ground_truth_normalized = _normalize(ground_truth)
-                given_normalized = _normalize(given_answer)
-                if ground_truth_normalized is None:
-                    return False
-                if ground_truth_normalized == given_normalized:
-                    return True
-
-                # Next call math verify.
-                given_answer.replace("\n", "")
-                ground_truth.replace("\n", "")
-                if "$" not in given_answer:
-                    given_answer = f"${given_answer}$"
-                if "$" not in ground_truth:
-                    ground_truth = f"${ground_truth}$"
-                return verify(
-                    parse(
-                        ground_truth,
-                        extraction_config=(
-                            LatexExtractionConfig(boxed_match_priority=0),
-                            ExprExtractionConfig(),
-                        ),
-                        fallback_mode="no_fallback",
-                        extraction_mode=["first_match"],
-                        parsing_timeout=1,
-                    ),
-                    parse(
-                        given_answer,
-                        extraction_config=(
-                            LatexExtractionConfig(boxed_match_priority=0),
-                            ExprExtractionConfig(),
-                        ),
-                        fallback_mode="no_fallback",
-                        extraction_mode=["first_match"],
-                        parsing_timeout=1,
-                    ),
-                    timeout_seconds=1,
-                )
-                # or symbolic_equal(ground_truth, given_answer)
-            except Exception:
-                return False
-    except TimeoutError:
-        return False
-
-
 def is_value_equal(given_answer: str, ground_truth: str) -> bool:
     assert ground_truth is not None
     ground_truth_normalized_mathd = mathd_normalize_answer(ground_truth)
@@ -732,7 +601,7 @@ def _str_is_int(x: str) -> bool:
         return False
 
 
-def _str_to_int(x: str) -> bool:
+def _str_to_int(x: str) -> int:
     x = x.replace(",", "")
     x = float(x)
     return int(x)
@@ -995,13 +864,6 @@ def grade(model_answer: str, gt_answer: str, fast: bool = True):
     correct = grade_answer_mathd(model_answer, gt_answer) or grade_answer_sympy(
         model_answer, gt_answer
     )
-    if not fast:
-        # This mode further uses math_verify to recall originally false positives.
-        # Will be a bit slower, and sensitive to bad inputs.
-        correct = correct or is_latex_equal(
-            model_answer,
-            gt_answer,
-        )
     return correct
 
 
@@ -1012,11 +874,7 @@ def r1_zero_reward_fn(response, ground_truth, fast=True):
         if "\\boxed" in model_answer:
             model_answer = extract_answer(model_answer)
             if model_answer is None:
-                return {
-                    "format_reward": 1.0,
-                    "answer_reward": 0.0,
-                    "reward": 0.0
-                }
+                return {"format_reward": 1.0, "answer_reward": 0.0, "reward": 0.0}
         if isinstance(ground_truth, float) or isinstance(ground_truth, int):
             ground_truth = str(ground_truth)
         if isinstance(ground_truth, str):
@@ -1026,36 +884,20 @@ def r1_zero_reward_fn(response, ground_truth, fast=True):
             for gt in ground_truth:
                 is_correct |= grade(model_answer, gt, fast)
         if is_correct:
-            return {
-                "format_reward": 1.0,
-                "answer_reward": 1.0,
-                "reward": 1.0
-            }
+            return {"format_reward": 1.0, "answer_reward": 1.0, "reward": 1.0}
         else:
             # Formatted but wrong answer; no format reward to avoid hacking.
-            return {
-                "format_reward": 1.0,
-                "answer_reward": 0.0,
-                "reward": 0.0
-            }
+            return {"format_reward": 1.0, "answer_reward": 0.0, "reward": 0.0}
     else:
         # Unformatted.
-        return {
-            "format_reward": 0.0,
-            "answer_reward": 0.0,
-            "reward": 0.0
-        }
+        return {"format_reward": 0.0, "answer_reward": 0.0, "reward": 0.0}
 
 
 def question_only_reward_fn(response, ground_truth, fast=True):
     model_answer = extract_answer(response)
     if model_answer is None:
         # Cannot even parse anything.
-        return {
-            "format_reward": 0.0,
-            "answer_reward": 0.0,
-            "reward": 0.0
-        }
+        return {"format_reward": 0.0, "answer_reward": 0.0, "reward": 0.0}
     if isinstance(ground_truth, float) or isinstance(ground_truth, int):
         ground_truth = str(ground_truth)
     if isinstance(ground_truth, str):
@@ -1066,15 +908,7 @@ def question_only_reward_fn(response, ground_truth, fast=True):
             is_correct |= grade(model_answer, gt, fast)
     if is_correct:
         # Correctness reward.
-        return {
-            "format_reward": 1.0,
-            "answer_reward": 1.0,
-            "reward": 1.0
-        }
+        return {"format_reward": 1.0, "answer_reward": 1.0, "reward": 1.0}
     else:
         # Formatted but wrong answer; no format reward to avoid hacking.
-        return {
-            "format_reward": 1.0,
-            "answer_reward": 0.0,
-            "reward": 0.0
-        }
+        return {"format_reward": 1.0, "answer_reward": 0.0, "reward": 0.0}
