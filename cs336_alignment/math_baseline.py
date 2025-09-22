@@ -9,7 +9,7 @@ import re
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Union
 
-from bohao.assignment5.drgrpo_grader import r1_zero_reward_fn
+from drgrpo_grader import r1_zero_reward_fn
 from vllm import LLM, SamplingParams
 
 
